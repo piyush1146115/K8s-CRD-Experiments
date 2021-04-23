@@ -14,21 +14,24 @@ limitations under the License.
 package main
 
 import (
-"flag"
-"fmt"
-"time"
+	"flag"
+	"fmt"
+	v12 "k8s.io/api/apps/v1"
+	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/homedir"
+	"path/filepath"
+	"time"
 
-"k8s.io/klog/v2"
+	"k8s.io/klog/v2"
 
-v1 "k8s.io/api/core/v1"
-meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-"k8s.io/apimachinery/pkg/fields"
-"k8s.io/apimachinery/pkg/util/runtime"
-"k8s.io/apimachinery/pkg/util/wait"
-"k8s.io/client-go/kubernetes"
-"k8s.io/client-go/tools/cache"
-"k8s.io/client-go/tools/clientcmd"
-"k8s.io/client-go/util/workqueue"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/workqueue"
 )
 
 // Controller demonstrates how to implement a controller with client-go.
@@ -77,11 +80,11 @@ func (c *Controller) syncToStdout(key string) error {
 
 	if !exists {
 		// Below we will warm up our cache with a Pod, so that we will see a delete for one pod
-		fmt.Printf("Pod %s does not exist anymore\n", key)
+		fmt.Printf("Deployment %s does not exist anymore\n", key)
 	} else {
 		// Note that you also have to check the uid if you have a local controlled resource, which
 		// is dependent on the actual instance, to detect that a Pod was recreated with the same name
-		fmt.Printf("Sync/Add/Update for Pod %s\n", obj.(*v1.Pod).GetName())
+		fmt.Printf("Sync/Add/Update for Deployment %s in %s namespace\n", obj.(*v12.Deployment).GetName(), obj.(*v12.Deployment).GetNamespace())
 	}
 	return nil
 }
@@ -118,7 +121,8 @@ func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
 
 	// Let the workers stop when we are done
 	defer c.queue.ShutDown()
-	klog.Info("Starting Pod controller")
+	//klog.Info("Starting Pod controller")
+	klog.Info("Starting Deployment controller")
 
 	go c.informer.Run(stopCh)
 
@@ -133,7 +137,8 @@ func (c *Controller) Run(threadiness int, stopCh chan struct{}) {
 	}
 
 	<-stopCh
-	klog.Info("Stopping Pod controller")
+	//klog.Info("Stopping Pod controller")
+	klog.Info("Stopping Deployment controller")
 }
 
 func (c *Controller) runWorker() {
@@ -145,7 +150,7 @@ func main() {
 	var kubeconfig string
 	var master string
 
-	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
+	flag.StringVar(&kubeconfig, "kubeconfig", filepath.Join(homedir.HomeDir(), ".kube", "config"), "absolute path to the kubeconfig file")
 	flag.StringVar(&master, "master", "", "master url")
 	flag.Parse()
 
@@ -161,8 +166,8 @@ func main() {
 		klog.Fatal(err)
 	}
 
-	// create the pod watcher
-	podListWatcher := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "pods", v1.NamespaceDefault, fields.Everything())
+	// create the deployment watcher
+	deploymentWatcher := cache.NewListWatchFromClient(clientset.AppsV1().RESTClient(),"deployments", v1.NamespaceDefault, fields.Everything())
 
 	// create the workqueue
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
@@ -171,7 +176,7 @@ func main() {
 	// whenever the cache is updated, the pod key is added to the workqueue.
 	// Note that when we finally process the item from the workqueue, we might see a newer version
 	// of the Pod than the version which was responsible for triggering the update.
-	indexer, informer := cache.NewIndexerInformer(podListWatcher, &v1.Pod{}, 0, cache.ResourceEventHandlerFuncs{
+	indexer, informer := cache.NewIndexerInformer(deploymentWatcher, &v12.Deployment{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
@@ -200,9 +205,11 @@ func main() {
 	// Let's suppose that we knew about a pod "mypod" on our last run, therefore add it to the cache.
 	// If this pod is not there anymore, the controller will be notified about the removal after the
 	// cache has synchronized.
-	indexer.Add(&v1.Pod{
-		ObjectMeta: meta_v1.ObjectMeta{
-			Name:      "mypod",
+
+
+	indexer.Add(&v12.Deployment{
+		ObjectMeta: meta_v1.ObjectMeta {
+			Name:      "myDeployment",
 			Namespace: v1.NamespaceDefault,
 		},
 	})
